@@ -1,0 +1,10 @@
+aiohttp
+asyncio
+flask
+google-generativeai
+iewt
+nltk
+numpy
+requests
+tflite-runtime
+websocket-client

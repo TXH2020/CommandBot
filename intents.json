@@ -1,0 +1,19 @@
+{"intents": [
+{"tag": "compile",
+ "patterns": ["Execute C Program", "Compile and run C program.", "Run C program"],
+ "responses": ["abcd"]
+},
+{"tag": "docker",
+ "patterns": ["Install curl on docker container", "Setup curl on docker container"],
+ "responses,": ["abcd"]   
+},
+{"tag": "sudo",
+ "patterns": ["Install sqlite browser", "Setup sqlite browser"],
+ "responses,": ["abcd"]   
+},
+{"tag": "long_task",
+ "patterns": ["Run a long running task", "Long running task","Long task"],
+ "responses,": ["abcd"]   
+}
+]
+}
