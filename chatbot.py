@@ -13,8 +13,10 @@ import ast
 import select
 import requests
 import time
+import yaml
 from websocket import create_connection
 from flask import *
+import os
 ws=None
 
 nltk.download('punkt')
@@ -35,13 +37,11 @@ def gen_id():
     return random.randint(1,1000)+random.randint(1,1000)+random.randint(1,1000)
 
 def post_transaction(x):
-    r=requests.post('http://localhost:3001/data',json=x)
+    try:
+        r=requests.post('http://localhost:3001/data',json=x)
+    except Exception as e:
+        print(e)
 
-def send(x):
-    ws.send(x)
-
-def recieve():
-    return ws.recv()
 
 def format(string):
     x={'command':string}
@@ -98,71 +98,87 @@ def classify(sentence):
 def response(sentence, userID='123', show_details=False):
     results = classify(sentence)
     if(results[0][0]=="compile"):
-        send(format('vi dummy.c\r'))
+        ws.send(format('vi dummy.c\r'))
         time.sleep(2)
-        send(format('i'))
+        ws.send(format('i'))
         time.sleep(2)
-        send(format('#include <stdio.h>\nvoid main(){\nprintf("Hello world");}'))
+        ws.send(format('#include <stdio.h>\nvoid main(){\nprintf("Hello world");}'))
         time.sleep(2)
-        send(format('\x1b'))
+        ws.send(format('\x1b'))
         time.sleep(2)
-        send(format(':wq\r'))
+        ws.send(format(':wq\r'))
         time.sleep(2)
-        d=perform_action("cc dummy.c")
-        post_transaction(d)
+        d=perform_action(ws,"cc dummy.c")
         if(d['status']=='0'):
-            send(format('./a.out\r'))
+            perform_action(ws,"cc dummy.c")
+            ws.send(format('rm dummy.c\r'))
             return "created, ran and executed a C program! Look at your home directory"
     elif(results[0][0]=="docker"):
-        send(format('docker exec -it ubuntu bash\r'))
+        ws.send(format('docker exec -it ubuntu bash\r'))
         time.sleep(3)
         x='apt update'
-        d=perform_action(x)
-        post_transaction(d)
+        d=perform_action(ws,x)
         if(d['status']=='0'):
-            d=perform_action('apt install -y curl')
-            post_transaction(d)
-        send(format('exit\r'))
+            d=perform_action(ws,'apt install -y curl')
+        ws.send(format('exit\r'))
         return "updated apt on docker and installed curl! Perform exec on the container 'ubuntu'"
     elif(results[0][0]=="sudo"):
        response=model.generate_content('Install sqlite browser on an Ubuntu machine. Once installed, dont run it. You have to return a series of Linux commands for executing the task. You must return the command in the following format; Command: some_command. When the task is completed, return Completed!')
-       send(format('sudo su\r'))
+       ws.send(format('sudo su\r'))
        time.sleep(1)
-       send(format('osboxes.org\r'))
+       ws.send(format('osboxes.org\r'))
        time.sleep(0.2)
        for i in range(len(response.text.split('\n'))-1):
-           d=perform_action(response.text.split('\n')[i].split(':')[1])
-           post_transaction(d)
+           d=perform_action(ws,response.text.split('\n')[i].split(':')[1])
            if(d['status']!='0'):
                return "failed"
-       send(format('exit\r'))
+       ws.send(format('exit\r'))
        return "successfully installed sqlite browser"
-       #perform_action('sudo apt update',direct=True,comm='osboxes.org\r')
-       #d=perform_action('sudo apt-get install -y sqlitebrowser')
+       #perform_action(ws,'sudo apt update',direct=True,comm='osboxes.org\r')
+       #d=perform_action(ws,'sudo apt-get install -y sqlitebrowser')
        #if(d['status']=='0'):
        #   return "successfully installed sqlite browser"
     elif(results[0][0]=="long_task"):
-        send(format("tmux new -s sess\r"))
+        ws.send(format("tmux new -s sess\r"))
         time.sleep(2)
         x=gen_id()
-        send(format("sleep 20"+"#;echo #"+str(x)+"#:Status=$?time-$((`date '+%s'`))_\r#"+"ws_url"))
+        ws.send(format("sleep 20"+"#;echo #"+str(x)+"#:Status=$?time-$((`date '+%s'`))_\r#"+"ws_url"))
         time.sleep(0.5)
         ws.close()
         asyncio.run(websocket_connection())
-        send(format("sleep 20"+"#"+str(x)+"#ws_url"))
+        ws.send(format("sleep 20"+"#"+str(x)+"#ws_url"))
         time.sleep(0.1)
-        send(format('tmux attach -t sess\r'))
+        ws.send(format('tmux attach -t sess\r'))
         while(True):
             r,_,_=select.select([ws],[],[])
             if(r):
                 try:
                     x=json.loads(ws.recv())
                     post_transaction(x)
-                    send(format('exit\r'))
+                    ws.send(format('exit\r'))
                     return str(x)
                 except:
                     pass
-            
+    elif(results[0][0]=="multiple_machines"):
+        with open('config.yaml','r') as f:
+            x=yaml.safe_load(f)
+        hosts=[]
+        async def run_multiple(x):
+            for i in x['hosts']:
+                hosts.append(await asyncio.gather(websocket_connection(tuple(i.values()))))
+        asyncio.run(run_multiple(x))
+        for i in hosts:
+            id=gen_id()
+            perform_action(i[0],'python3 -m venv '+str(id))
+            i[0].send(format('source  '+str(id)+'/bin/activate\r'))
+            x={"file_transfer":os.getcwd()+'/r.txt'}
+            json_data = ast.literal_eval(json.dumps(x))
+            i[0].send(json.dumps(json_data))
+            perform_action(i[0],'pip install -r r.txt')
+            i[0].send(format('deactivate\r'))
+            i[0].close()
+        return "created virtual environments on all hosts"
+
 app=Flask(__name__)
 @app.post('/')
 def predict1():
@@ -176,22 +192,23 @@ def predict1():
     return jsonify(message)
 
 
-def perform_action(command,direct=False,comm=None):
+def perform_action(ws,command,direct=False,comm=None):
     x={'command':command+"#;echo #"+str(gen_id())+"#:Status=$?time-$((`date '+%s'`))_\r#"+"sessionStorage.ws_url"}
     json_data = ast.literal_eval(json.dumps(x))
-    send(json.dumps(json_data))
+    ws.send(json.dumps(json_data))
     if(direct):
         time.sleep(0.5)
-        send(format(comm))
+        ws.send(format(comm))
     d=None
     while(True):
         r,_,_=select.select([ws],[],[])
         if(r):
             try:
-                d=json.loads(recieve())
+                d=json.loads(ws.recv())
                 break
             except:
                 pass
+    post_transaction(d)
     return d
 
 @app.get('/chatbot')
@@ -199,22 +216,32 @@ def chat():
     return render_template('base.html')
 
     
-async def websocket_connection():
+async def websocket_connection(creds=None):
     global ws
     async with aiohttp.ClientSession() as session:
-        creds=('osboxes','osboxes','osboxes.org')
+        flag=1
+        if(not(creds)):
+            creds=('osboxes','osboxes','osboxes.org')
+            flag=0
         url='http://localhost:8888?hostname=%s&username=%s&password=%s'%creds
         async with session.post(url) as response:
             dictionary = await response.json()
-            ws = create_connection("ws://localhost:8888/ws?id="+dictionary.get('id'))
+            host=None
+            if(flag==0):
+                ws = create_connection("ws://localhost:8888/ws?id="+dictionary.get('id'))
+                conn = ws
+            else:
+                host = create_connection("ws://localhost:8888/ws?id="+dictionary.get('id'))
+                conn = host
             while(True):
-                r,_,_=select.select([ws],[],[])
+                r,_,_=select.select([conn],[],[])
                 if r:
                     break
             print("Connection dict:", dictionary)
             x={"visualize":"1"}
             json_data = ast.literal_eval(json.dumps(x))
-            ws.send(json.dumps(json_data))
+            conn.send(json.dumps(json_data))
+            return conn
 
 asyncio.run(websocket_connection())
 if(__name__=="__main__"):

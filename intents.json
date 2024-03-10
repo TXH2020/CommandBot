@@ -14,6 +14,10 @@
 {"tag": "long_task",
  "patterns": ["Run a long running task", "Long running task","Long task"],
  "responses,": ["abcd"]   
+},
+{"tag": "multiple_machines",
+ "patterns": ["Run across multiple machines", "Run task across multiple machines","Run task across several computers"],
+ "responses,": ["abcd"]   
 }
 ]
 }
